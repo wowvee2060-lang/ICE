@@ -334,7 +334,8 @@ function renderRun(){
   if(lt) h += '<div class="card"><div class="hint">🚚 ต้องขนวันนี้</div><b>'+lt+'</b></div>';
   if(c){
     var idx = stops.indexOf(c)+1, od = oldDebts(c.id), odSum = sumDebts(od);
-    h += '<div class="card cur"><h2>จุดที่ '+idx+': '+esc(c.name)+'</h2>'+
+    h += '<div class="card cur"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><h2 style="min-width:0;word-break:break-word">จุดที่ '+idx+': '+esc(c.name)+'</h2>'+
+      '<a class="btn pri" href="'+navLink(c)+'" target="_blank" rel="noopener" style="flex:0 0 auto;white-space:nowrap">🧭 นำทาง</a></div>'+
       '<div class="sub">สถานะ: '+LABEL[c.status]+(c.freq==="alt"?' · เว้นวัน':'')+'</div>';
     var oc = orderChips(c);
     h += '<div>'+(oc||'<span class="hint">ยังไม่ได้ตั้งความต้องการ (ตั้งที่แท็บจัดจุดส่ง ✏️)</span>')+'</div>';
@@ -349,7 +350,7 @@ function renderRun(){
         '<button class="b-paid" data-st="paid">จ่ายสด</button>'+
         '<button class="b-owe" data-st="owe">ค้างจ่าย</button>'+
         '<button class="b-closed" data-st="closed">ร้านปิด</button></div>'+
-      '<div class="row"><a class="btn pri" href="'+navLink(c)+'" target="_blank" rel="noopener">🧭 นำทาง</a>'+
+      '<div class="row">'+
       (c.status!=="pending"?'<button class="btn" id="undo">↩︎ ยกเลิกสถานะ</button>':'')+'</div>'+extraBlock(c.id)+'</div>';
   }
   h += walkinHTML();
