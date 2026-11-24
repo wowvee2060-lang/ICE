@@ -19,6 +19,8 @@ header .sum{font-size:13px;text-align:right;line-height:1.3}
 .card{background:#fff;border-radius:14px;padding:12px;margin-bottom:10px;box-shadow:0 1px 4px #0002}
 .cur h2{margin:0 0 2px;font-size:20px}
 .cur .sub{color:#5b6b76;font-size:14px;margin-bottom:8px}
+.xbtns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+.xbtns button{border:0;border-radius:12px;padding:14px 4px;font-size:16px;font-weight:700;color:#fff}
 .btns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:10px 0 6px}
 .btns button{border:0;border-radius:12px;padding:18px 4px;font-size:18px;font-weight:700;color:#fff}
 .b-paid{background:#1e9e4a}.b-owe{background:#e08a00}.b-closed{background:#c0392b}
@@ -75,19 +77,19 @@ textarea{width:100%;height:120px;font-size:13px;border-radius:10px;border:1px so
 
 <script>
 var KEY = "iceRoute.v2", OLD = "iceRoute.v1";
-var stops = [], debts = [], walkins = [], history = {}, openDay = null, startPt = null, settingStart = false, startMarker = null;
+var stops = [], debts = [], walkins = [], history = {}, extras = [], extraOpen = null, openDay = null, startPt = null, settingStart = false, startMarker = null;
 var selId = null, mode = "run", pending = null, pendingMarker = null;
 var markers = {}, myMarker = null, msg = "", editingId = null;
 
 function load(){
   try{
     var s = localStorage.getItem(KEY);
-    if(s){ var o = JSON.parse(s); stops = o.stops||[]; debts = o.debts||[]; walkins = o.walkins||[]; history = o.history||{}; startPt = o.startPt||null; return; }
+    if(s){ var o = JSON.parse(s); stops = o.stops||[]; debts = o.debts||[]; walkins = o.walkins||[]; history = o.history||{}; extras = o.extras||[]; startPt = o.startPt||null; return; }
     var s1 = localStorage.getItem(OLD);
     if(s1) stops = JSON.parse(s1);
   }catch(e){}
 }
-function save(){ try{ localStorage.setItem(KEY, JSON.stringify({stops:stops, debts:debts, walkins:walkins, history:history, startPt:startPt})); }catch(e){} }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify({stops:stops, debts:debts, walkins:walkins, history:history, extras:extras, startPt:startPt})); }catch(e){} }
 load();
 
 function dateOf(iso){ var d=new Date(iso); return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
@@ -177,6 +179,52 @@ function payDebts(list){
   save(); render();
 }
 
+/* ---------- ซื้อเพิ่ม ---------- */
+function addExtra(stopId, amt, kind){
+  var st = stops.filter(function(x){return x.id===stopId;})[0];
+  var e = {id:uid(), stopId:stopId, name:st?st.name:"", date:today(), time:new Date().toISOString(), amount:amt, kind:kind};
+  if(kind==="owe"){
+    var d = {id:uid(), stopId:stopId, name:e.name, amount:amt, date:e.date, paid:false, auto:false, extraId:e.id};
+    debts.push(d); e.debtId = d.id;
+  }
+  extras.push(e); save();
+}
+function delExtra(id){
+  var e = extras.filter(function(x){return x.id===id;})[0]; if(!e) return;
+  if(e.debtId) debts = debts.filter(function(d){return d.id!==e.debtId;});
+  extras = extras.filter(function(x){return x.id!==id;}); save();
+}
+function extraBlock(stopId){
+  var t = today(), list = extras.filter(function(e){return e.stopId===stopId && e.date===t;});
+  var h = '<div style="margin-top:10px;border-top:1px dashed #d5dee4;padding-top:8px">';
+  list.forEach(function(e){
+    h += '<div class="dline"><span>ซื้อเพิ่ม ฿'+money(e.amount)+' · '+(e.kind==="paid"?"จ่ายสด":"ค้างจ่าย")+'</span><button class="btn sm" data-xdel="'+e.id+'">ลบ</button></div>';
+  });
+  if(extraOpen===stopId){
+    h += '<input type="number" inputmode="decimal" id="xAmt" placeholder="ยอดซื้อเพิ่ม ฿" style="margin-top:6px">'+
+      '<div class="xbtns"><button style="background:#1e9e4a" data-xk="paid">จ่ายสด</button><button style="background:#e08a00" data-xk="owe">ค้างจ่าย</button></div>'+
+      '<button class="btn sm" data-xopen="">ยกเลิก</button>';
+  } else {
+    h += '<button class="btn" data-xopen="'+stopId+'">➕ ซื้อเพิ่ม</button>';
+  }
+  return h+'</div>';
+}
+function bindExtra(el){
+  el.querySelectorAll("[data-xopen]").forEach(function(b){
+    b.onclick = function(){ extraOpen = b.getAttribute("data-xopen")||null; render(); var x=document.getElementById("xAmt"); if(x) x.focus(); };
+  });
+  el.querySelectorAll("[data-xk]").forEach(function(b){
+    b.onclick = function(){
+      var a = Number((document.getElementById("xAmt")||{}).value||0);
+      if(!(a>0)){ var x=document.getElementById("xAmt"); if(x) x.focus(); return; }
+      addExtra(extraOpen, a, b.getAttribute("data-xk")); extraOpen = null; render();
+    };
+  });
+  el.querySelectorAll("[data-xdel]").forEach(function(b){
+    b.onclick = function(){ delExtra(b.getAttribute("data-xdel")); render(); };
+  });
+}
+
 /* ---------- ขาจร ---------- */
 function walkToday(){ var t=today(); return walkins.filter(function(w){return w.date===t;}).reduce(function(a,w){return a+Number(w.amount||0);},0); }
 function walkinHTML(){
@@ -243,10 +291,13 @@ function summary(){
     if(s.status==="closed") closed++;
   });
   debts.forEach(function(d){ if(d.paid && d.paidDate===t) collected+=Number(d.amount||0); });
+  var exP=0, exO=0;
+  extras.forEach(function(e){ if(e.date===t){ if(e.kind==="paid") exP+=Number(e.amount||0); else exO+=Number(e.amount||0); } });
+  cash += exP; newDebt += exO;
   var done = paid+owe+closed, total = stops.filter(active).length, walk = walkToday();
   document.getElementById("sum").innerHTML =
     "ส่งแล้ว "+done+"/"+total+" · สด ฿"+money(cash+collected)+"<br>ขาจร ฿"+money(walk)+"<br>ค้างใหม่ ฿"+money(newDebt)+" · ค้างรวม ฿"+money(sumDebts(unpaid()));
-  return {walk:walk,total:total,paid:paid,owe:owe,closed:closed,cash:cash,newDebt:newDebt,collected:collected,done:done};
+  return {extra:exP+exO,walk:walk,total:total,paid:paid,owe:owe,closed:closed,cash:cash,newDebt:newDebt,collected:collected,done:done};
 }
 
 function setStatus(id, st){
@@ -276,6 +327,7 @@ function renderRun(){
       '<div>เก็บค้างเก่า ฿'+money(sm.collected)+'</div>'+
       '<div>ค้างจ่ายใหม่ '+sm.owe+' ร้าน = ฿'+money(sm.newDebt)+'</div>'+
       '<div>ร้านปิด '+sm.closed+' ร้าน</div>'+
+      '<div>ซื้อเพิ่ม ฿'+money(sm.extra)+'</div>'+
       '<div>ขาจร ฿'+money(sm.walk)+'</div></div>';
   }
   var lt = loadTotals();
@@ -298,19 +350,20 @@ function renderRun(){
         '<button class="b-owe" data-st="owe">ค้างจ่าย</button>'+
         '<button class="b-closed" data-st="closed">ร้านปิด</button></div>'+
       '<div class="row"><a class="btn pri" href="'+navLink(c)+'" target="_blank" rel="noopener">🧭 นำทาง</a>'+
-      (c.status!=="pending"?'<button class="btn" id="undo">↩︎ ยกเลิกสถานะ</button>':'')+'</div></div>';
+      (c.status!=="pending"?'<button class="btn" id="undo">↩︎ ยกเลิกสถานะ</button>':'')+'</div>'+extraBlock(c.id)+'</div>';
   }
   h += walkinHTML();
   h += '<div class="card">';
   stops.forEach(function(s,i){
     var od = sumDebts(oldDebts(s.id));
     h += '<div class="item'+(c&&c.id===s.id?' sel':'')+'" data-id="'+s.id+'"><div class="num s-'+(s.status==="pending"&&!isDue(s)?"rest":s.status)+'">'+(i+1)+'</div>'+
-      '<div class="t"><div class="n">'+esc(s.name)+'</div><div class="st">'+(s.status==="pending"&&!isDue(s)?"พักวันนี้ (เว้นวัน)":LABEL[s.status])+(orderText(s)?' · '+orderText(s):'')+(s.amount?' · ฿'+money(s.amount):'')+(od?' · <span style="color:#c26a00">ค้างเก่า ฿'+money(od)+'</span>':'')+'</div></div></div>';
+      '<div class="t"><div class="n">'+esc(s.name)+'</div><div class="st">'+(s.status==="pending"&&!isDue(s)?"พักวันนี้ (เว้นวัน)":LABEL[s.status])+(orderText(s)?' · '+orderText(s):'')+(s.amount?' · ฿'+money(s.amount):'')+(function(){ var x=extras.filter(function(e){return e.stopId===s.id&&e.date===today();}).reduce(function(a,e){return a+Number(e.amount||0);},0); return x?' · ซื้อเพิ่ม ฿'+money(x):''; })()+(od?' · <span style="color:#c26a00">ค้างเก่า ฿'+money(od)+'</span>':'')+'</div></div></div>';
   });
   h += '</div>';
   el.innerHTML = h;
 
   bindWalkin(el);
+  bindExtra(el);
   el.querySelectorAll(".btns button").forEach(function(b){
     b.onclick = function(){
       var a = document.getElementById("amt");
@@ -366,7 +419,7 @@ function renderEdit(){
     '<textarea id="bkBox" style="display:none;margin-top:8px" placeholder="วางข้อมูลสำรองที่นี่ แล้วกดนำเข้าอีกครั้ง"></textarea></div>';
   el.innerHTML = h;
   document.getElementById("bkOut").onclick = function(){
-    var b = document.getElementById("bkBox"), t = JSON.stringify({stops:stops, debts:debts, walkins:walkins, history:history, startPt:startPt});
+    var b = document.getElementById("bkBox"), t = JSON.stringify({stops:stops, debts:debts, walkins:walkins, history:history, extras:extras, startPt:startPt});
     b.style.display="block"; b.value=t; b.select(); try{ navigator.clipboard.writeText(t); }catch(e){}
   };
   document.getElementById("bkIn").onclick = function(){
@@ -375,7 +428,7 @@ function renderEdit(){
     try{
       var o = JSON.parse(b.value);
       if(!o || !Array.isArray(o.stops)) throw 0;
-      stops=o.stops; debts=o.debts||[]; walkins=o.walkins||[]; history=o.history||{}; startPt=o.startPt||null;
+      stops=o.stops; debts=o.debts||[]; walkins=o.walkins||[]; history=o.history||{}; extras=o.extras||[]; startPt=o.startPt||null;
       selId=null; save(); msg="นำเข้าข้อมูลแล้ว"; render(); fitAll();
     }catch(e){ msg="ข้อมูลสำรองไม่ถูกต้อง"; render(); }
   };
@@ -428,7 +481,7 @@ function renderEdit(){
   document.getElementById("exp").onclick = function(){
     var sm = summary(), t = "สรุปส่งน้ำแข็ง "+fmtDate(today())+"\nจ่ายสด "+sm.paid+" ร้าน ฿"+money(sm.cash)+
       "\nเก็บค้างเก่า ฿"+money(sm.collected)+"\nค้างจ่ายใหม่ "+sm.owe+" ร้าน ฿"+money(sm.newDebt)+
-      "\nร้านปิด "+sm.closed+" ร้าน\nขาจร ฿"+money(sm.walk)+"\nยอดลูกหนี้รวม ฿"+money(sumDebts(unpaid()))+"\n\n";
+      "\nร้านปิด "+sm.closed+" ร้าน\nซื้อเพิ่ม ฿"+money(sm.extra)+"\nขาจร ฿"+money(sm.walk)+"\nยอดลูกหนี้รวม ฿"+money(sumDebts(unpaid()))+"\n\n";
     stops.forEach(function(s,i){ t += (i+1)+". "+s.name+" - "+LABEL[s.status]+(s.amount?" ฿"+money(s.amount):"")+(orderText(s)?" ["+orderText(s)+"]":"")+"\n"; });
     var o = document.getElementById("out"); o.style.display="block"; o.value=t; o.select();
     try{ navigator.clipboard.writeText(t); }catch(e){}
@@ -483,7 +536,7 @@ function renderDebt(){
     });
     if(routeInfo && routeInfo.id===k) h += '<div class="warn" style="margin-top:8px">🛣 '+esc(routeInfo.text)+'</div>';
     h += '<div style="margin-top:8px" class="row"><button class="btn ok" data-payall="'+k+'">รับชำระทั้งร้าน</button>'+
-      (st?'<a class="btn pri" href="'+navLink(st)+'" target="_blank" rel="noopener">🧭 นำทาง</a>':'')+'</div></div>';
+      (st?'<a class="btn pri" href="'+navLink(st)+'" target="_blank" rel="noopener">🧭 นำทาง</a>':'')+'</div>'+(st?extraBlock(k):'')+'</div>';
   });
   el.innerHTML = h;
   el.querySelectorAll("[data-pay]").forEach(function(b){
@@ -495,6 +548,7 @@ function renderDebt(){
   el.querySelectorAll("[data-route]").forEach(function(b){
     b.onclick = function(){ showRouteTo(b.getAttribute("data-route")); };
   });
+  bindExtra(el);
   var cr = document.getElementById("clrRoute"); if(cr) cr.onclick = function(){ clearRoute(); render(); };
 }
 
@@ -514,8 +568,10 @@ function dayStats(d){
   });
   walkins.forEach(function(w){ if(w.date===d){ r.walk+=Number(w.amount||0); r.walkN++; r.walks.push(w); } });
   debts.forEach(function(x){ if(x.paid && x.paidDate===d){ r.coll+=Number(x.amount||0); r.colls.push(x); } });
-  r.sales = r.paid + r.owe + r.walk;
-  r.cashIn = r.paid + r.walk + r.coll;
+  r.extras = []; r.exPaid = 0; r.exOwe = 0;
+  extras.forEach(function(e){ if(e.date===d){ r.extras.push(e); if(e.kind==="paid") r.exPaid+=Number(e.amount||0); else r.exOwe+=Number(e.amount||0); } });
+  r.sales = r.paid + r.owe + r.walk + r.exPaid + r.exOwe;
+  r.cashIn = r.paid + r.walk + r.coll + r.exPaid;
   return r;
 }
 function allDays(){
@@ -524,6 +580,7 @@ function allDays(){
   walkins.forEach(function(w){set[w.date]=1;});
   debts.forEach(function(x){ if(x.paidDate) set[x.paidDate]=1; });
   stops.forEach(function(x){ if(x.status!=="pending" && x.time) set[dateOf(x.time)]=1; });
+  extras.forEach(function(e){ set[e.date]=1; });
   return Object.keys(set).sort().reverse();
 }
 var STL = {paid:"จ่ายสด",owe:"ค้างจ่าย",closed:"ร้านปิด"};
@@ -531,7 +588,7 @@ function historyText(){
   var t = "ประวัติยอดขายรายวัน\n";
   allDays().forEach(function(d){
     var r = dayStats(d);
-    t += "\n"+fmtDate(d)+": ยอดขาย ฿"+money(r.sales)+" (ร้านประจำสด ฿"+money(r.paid)+", ค้างจ่าย ฿"+money(r.owe)+", ขาจร ฿"+money(r.walk)+") เก็บค้างเก่า ฿"+money(r.coll)+" เงินสดรับ ฿"+money(r.cashIn);
+    t += "\n"+fmtDate(d)+": ยอดขาย ฿"+money(r.sales)+" (ร้านประจำสด ฿"+money(r.paid)+", ค้างจ่าย ฿"+money(r.owe)+", ขาจร ฿"+money(r.walk)+", ซื้อเพิ่ม ฿"+money(r.exPaid+r.exOwe)+") เก็บค้างเก่า ฿"+money(r.coll)+" เงินสดรับ ฿"+money(r.cashIn);
   });
   return t;
 }
@@ -539,6 +596,9 @@ function deleteDay(d){
   delete history[d];
   walkins = walkins.filter(function(w){return w.date!==d;});
   debts = debts.filter(function(x){return !(x.paid && x.paidDate===d);});
+  var gone = extras.filter(function(e){return e.date===d;}).map(function(e){return e.debtId;});
+  extras = extras.filter(function(e){return e.date!==d;});
+  if(d===today()) debts = debts.filter(function(x){ return !(gone.indexOf(x.id)>=0 && !x.paid); });
   if(d===today()){
     stops.forEach(function(x){
       if(x.status!=="pending"){
@@ -561,12 +621,13 @@ function confirmBtn(btn, label, fn){
   };
 }
 function renderHist(){
-  var el = document.getElementById("content"), days = allDays(), shown = days.slice(0,30), g = {sales:0,paid:0,owe:0,walk:0,coll:0}, h = "";
+  var el = document.getElementById("content"), days = allDays(), shown = days.slice(0,30), g = {sales:0,paid:0,owe:0,walk:0,coll:0,ex:0}, h = "";
   var stats = {};
-  shown.forEach(function(d){ var r = dayStats(d); stats[d]=r; g.sales+=r.sales; g.paid+=r.paid; g.owe+=r.owe; g.walk+=r.walk; g.coll+=r.coll; });
+  shown.forEach(function(d){ var r = dayStats(d); stats[d]=r; g.sales+=r.sales; g.paid+=r.paid; g.owe+=r.owe; g.walk+=r.walk; g.coll+=r.coll; g.ex+=r.exPaid+r.exOwe; });
   h += '<div class="card"><div class="hint">รวม '+shown.length+' วันล่าสุด</div><div class="big" style="color:#0b6fa4">฿'+money(g.sales)+'</div>'+
     '<div class="hrow"><span>ร้านประจำ (จ่ายสด)</span><b>฿'+money(g.paid)+'</b></div>'+
     '<div class="hrow"><span>ร้านประจำ (ค้างจ่าย)</span><b>฿'+money(g.owe)+'</b></div>'+
+    '<div class="hrow"><span>ซื้อเพิ่ม</span><b>฿'+money(g.ex)+'</b></div>'+
     '<div class="hrow"><span>ขาจร</span><b>฿'+money(g.walk)+'</b></div>'+
     '<div class="hrow"><span>เก็บค้างเก่าได้</span><b>฿'+money(g.coll)+'</b></div>'+
     '<div class="row" style="margin-top:8px"><button class="btn" id="hcopy">คัดลอกประวัติ</button><button class="btn sm" id="hdelall">🗑 ลบประวัติทั้งหมด</button></div>'+
@@ -577,6 +638,7 @@ function renderHist(){
       '<span><span class="big" style="font-size:19px;color:#0b6fa4">฿'+money(r.sales)+'</span> '+(isOpen?'▲':'▼')+'</span></div>'+
       '<div class="hrow"><span>ร้านประจำ จ่ายสด ('+r.paidN+' ร้าน)</span><b>฿'+money(r.paid)+'</b></div>'+
       '<div class="hrow"><span>ร้านประจำ ค้างจ่าย ('+r.oweN+' ร้าน)</span><b style="color:#c26a00">฿'+money(r.owe)+'</b></div>'+
+      '<div class="hrow"><span>ซื้อเพิ่ม ('+r.extras.length+' ครั้ง)</span><b>฿'+money(r.exPaid+r.exOwe)+'</b></div>'+
       '<div class="hrow"><span>ขาจร ('+r.walkN+' ครั้ง)</span><b>฿'+money(r.walk)+'</b></div>'+
       '<div class="hrow"><span>เก็บค้างเก่า</span><b>฿'+money(r.coll)+'</b></div>'+
       '<div class="hrow" style="border-top:1px solid #e0e7ec;margin-top:4px;padding-top:6px"><span>เงินสดรับจริง</span><b>฿'+money(r.cashIn)+'</b></div>';
@@ -584,6 +646,7 @@ function renderHist(){
       h += '<div style="margin-top:8px"><div class="hint">ร้านประจำ</div>';
       if(!r.items.length) h += '<div class="hint">ไม่มีข้อมูล</div>';
       r.items.forEach(function(i){ h += '<div class="dline"><span>'+esc(i.name)+' · '+STL[i.status]+'</span><b>'+(i.status==="closed"?'-':'฿'+money(i.amount))+'</b></div>'; });
+      if(r.extras.length){ h += '<div class="hint" style="margin-top:6px">ซื้อเพิ่ม</div>'; r.extras.forEach(function(e){ h += '<div class="dline"><span>'+esc(e.name)+' · '+(e.kind==="paid"?"จ่ายสด":"ค้างจ่าย")+'</span><b>฿'+money(e.amount)+'</b></div>'; }); }
       if(r.walks.length){ h += '<div class="hint" style="margin-top:6px">ขาจร</div>'; r.walks.forEach(function(w){ var tt=new Date(w.time||0); h += '<div class="dline"><span>'+pad(tt.getHours())+":"+pad(tt.getMinutes())+(w.note?' · '+esc(w.note):'')+'</span><b>฿'+money(w.amount)+'</b></div>'; }); }
       if(r.colls.length){ h += '<div class="hint" style="margin-top:6px">เก็บค้างเก่า</div>'; r.colls.forEach(function(x){ h += '<div class="dline"><span>'+esc(x.name)+' (ค้างเมื่อ '+fmtDate(x.date)+')</span><b>฿'+money(x.amount)+'</b></div>'; }); }
       h += '<div style="margin-top:10px"><button class="btn sm" data-delday="'+d+'">🗑 ลบประวัติวันที่ '+fmtDate(d)+'</button>'+
