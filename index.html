@@ -436,9 +436,38 @@ function renderEdit(){
 }
 
 /* ---------- แท็บลูกหนี้ ---------- */
+var routeLayer = null, routeInfo = null;
+function clearRoute(){ if(routeLayer){ map.removeLayer(routeLayer); routeLayer=null; } routeInfo=null; }
+async function showRouteTo(stopId){
+  var st = stops.filter(function(x){return x.id===stopId;})[0]; if(!st) return;
+  clearRoute();
+  var from = myPos ? {lat:myPos.lat,lng:myPos.lng} : startPt, label = myPos ? "ตำแหน่งปัจจุบัน" : "จุดเริ่มต้นที่ตั้งไว้";
+  if(!from){ routeInfo = {id:stopId, text:"ยังไม่มีตำแหน่งปัจจุบัน (อนุญาตตำแหน่งให้ Chrome หรือตั้ง 🏠 จุดเริ่มต้น) แสดงเฉพาะที่ตั้งร้าน"}; map.setView([st.lat,st.lng],16); render(); return; }
+  routeInfo = {id:stopId, text:"กำลังหาเส้นทางจาก"+label+"..."}; render();
+  var line = null, text = "";
+  try{
+    var ctl = new AbortController(), to = setTimeout(function(){ctl.abort();}, 9000);
+    var r = await fetch("https://router.project-osrm.org/route/v1/driving/"+from.lng+","+from.lat+";"+st.lng+","+st.lat+"?overview=full&geometries=geojson", {signal:ctl.signal});
+    clearTimeout(to);
+    var j = await r.json();
+    if(j.code==="Ok" && j.routes && j.routes[0]){
+      var rt = j.routes[0];
+      line = L.polyline(rt.geometry.coordinates.map(function(c){return [c[1],c[0]];}), {color:"#2a6df4", weight:6, opacity:0.85});
+      text = "จาก"+label+" ระยะทาง "+(rt.distance/1000).toFixed(1)+" กม. ประมาณ "+Math.max(1,Math.round(rt.duration/60))+" นาที";
+    }
+  }catch(e){}
+  if(!line){
+    line = L.polyline([[from.lat,from.lng],[st.lat,st.lng]], {color:"#2a6df4", weight:4, dashArray:"8 8"});
+    text = "จาก"+label+" ตรงถึงร้านประมาณ "+hav(from,st).toFixed(1)+" กม. (เส้นตรง ต่อเน็ตหาเส้นถนนไม่ได้)";
+  }
+  routeLayer = line.addTo(map);
+  routeInfo = {id:stopId, text:text};
+  map.fitBounds(line.getBounds(), {padding:[40,40], maxZoom:17});
+  render();
+}
 function renderDebt(){
   var el = document.getElementById("content"), list = unpaid(), h = "";
-  h += '<div class="card"><div class="hint">ยอดลูกหนี้ค้างรวมทุกร้าน</div><div class="big">฿'+money(sumDebts(list))+'</div></div>';
+  h += '<div class="card"><div class="hint">ยอดลูกหนี้ค้างรวมทุกร้าน</div><div class="big">฿'+money(sumDebts(list))+'</div>'+(routeLayer?'<button class="btn sm" id="clrRoute" style="margin-top:6px">ล้างเส้นทางบนแผนที่</button>':'')+'</div>';
   if(!list.length){ h += '<div class="card hint">ไม่มียอดค้างจ่าย 🎉</div>'; el.innerHTML = h; return; }
   var groups = {}, order = [];
   list.forEach(function(d){ if(!groups[d.stopId]){ groups[d.stopId]=[]; order.push(d.stopId);} groups[d.stopId].push(d); });
@@ -446,14 +475,15 @@ function renderDebt(){
   order.forEach(function(k){
     var g = groups[k].sort(function(a,b){return a.date<b.date?-1:1;});
     var st = stops.filter(function(s){return s.id===k;})[0];
-    h += '<div class="card"><div class="row" style="justify-content:space-between"><b>'+esc(st?st.name:g[0].name)+'</b>'+
+    h += '<div class="card"><div class="row" style="justify-content:space-between"><span><b>'+esc(st?st.name:g[0].name)+'</b>'+(st?' <button class="btn sm" data-route="'+k+'" title="แสดงเส้นทาง">📍</button>':'')+'</span>'+
       '<span class="big" style="font-size:18px">฿'+money(sumDebts(g))+'</span></div>';
     g.forEach(function(d){
       h += '<div class="dline"><span>'+fmtDate(d.date)+' · ฿'+money(d.amount)+'</span>'+
         '<button class="btn ok sm" data-pay="'+d.id+'">รับชำระ</button></div>';
     });
+    if(routeInfo && routeInfo.id===k) h += '<div class="warn" style="margin-top:8px">🛣 '+esc(routeInfo.text)+'</div>';
     h += '<div style="margin-top:8px" class="row"><button class="btn ok" data-payall="'+k+'">รับชำระทั้งร้าน</button>'+
-      (st?'<button class="btn" data-go="'+k+'">📍 ดูบนแผนที่</button>':'')+'</div></div>';
+      (st?'<a class="btn pri" href="'+navLink(st)+'" target="_blank" rel="noopener">🧭 นำทาง</a>':'')+'</div></div>';
   });
   el.innerHTML = h;
   el.querySelectorAll("[data-pay]").forEach(function(b){
@@ -462,9 +492,10 @@ function renderDebt(){
   el.querySelectorAll("[data-payall]").forEach(function(b){
     b.onclick = function(){ var k=b.getAttribute("data-payall"); payDebts(debts.filter(function(d){return d.stopId===k && !d.paid;})); };
   });
-  el.querySelectorAll("[data-go]").forEach(function(b){
-    b.onclick = function(){ var s=stops.filter(function(x){return x.id===b.getAttribute("data-go");})[0]; if(s) map.setView([s.lat,s.lng],17); };
+  el.querySelectorAll("[data-route]").forEach(function(b){
+    b.onclick = function(){ showRouteTo(b.getAttribute("data-route")); };
   });
+  var cr = document.getElementById("clrRoute"); if(cr) cr.onclick = function(){ clearRoute(); render(); };
 }
 
 /* ---------- ประวัติรายวัน ---------- */
